@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Security: Certificados, chaves e credenciais
+# ---------------------------------------------------------------------------
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+certificado/
+*.secret
+*.credentials
+*.token
