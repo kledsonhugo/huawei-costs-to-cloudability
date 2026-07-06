@@ -16,7 +16,7 @@ A solução contempla três macro funcionalidades:
 
 2. **FunctionGraph** (`fg-cloudability`) em uma **Conta Centralizada**, que extrai os dados de custos do bucket **OBS** da **Conta Master** e os envia para um bucket **OBS** da **Conta Centralizada**.
 
-3. **FunctionGraph** (`fg-cloudability-s3`) em uma **Conta Centralizada**, que lê os arquivos de custos (CSV) e metadados (JSON) do bucket **OBS** da **Conta Centralizada** e os envia para um bucket **S3** na **AWS**. 
+3. **FunctionGraph** (`fg-cloudability-s3`) em uma **Conta Centralizada**, que lê os arquivos de custos (CSV) e metadados (JSON) do bucket **OBS** da **Conta Centralizada**. O envio para o bucket **S3** na **AWS** está atualmente desabilitado. 
 
 ## FunctionGraph `fg-cloudability`
 
@@ -63,11 +63,12 @@ Exemplo:
 ```json
 {
   "content_type": "CSV",
-  "root_dir": "target-bucket",
+  "root_dir": "s3-bucket",
   "all_report_keys": [
     "Huawei/20260301-20260401/1714521600/1714521600.csv"
   ],
-  "focus_version": "1.0"
+  "focus_version": "1.0",
+  "report_period": "20260301-20260401"
 }
 ```
 
@@ -92,15 +93,15 @@ Operações realizadas:
 Leitura dos arquivos no bucket OBS de destino.
 
 * Método: `listObjects`
-* Filtro por prefixo `Huawei/`
+* Filtro por prefixo `Huawei/<report_period>/` (período atual `YYYYMM01-YYYY(M+1)01`)
 * Ignora objetos com tamanho 0
 
 ---
 
-### Identificação do par CSV + JSON mais recente
+### Identificação do par CSV + Manifest mais recente
 
-* Filtra arquivos `.csv` e `.json`
-* Emparelha CSV e JSON pelo nome (mesmo epoch)
+* Filtra arquivos `.csv` e `-Manifest.json`
+* Emparelha CSV e Manifest pelo nome (mesmo epoch)
 * Seleciona o par mais recente (maior epoch)
 
 ---
@@ -108,37 +109,31 @@ Leitura dos arquivos no bucket OBS de destino.
 ### Download dos arquivos
 
 * Download do CSV para `/tmp/<epoch>.csv`
-* Download do JSON para `/tmp/<epoch>.json`
+* Download do Manifest para `/tmp/<epoch>-Manifest.json`
 
 ---
 
-### Autenticação no Vault
+### Envio para AWS S3 (desabilitado)
 
-* Login via certificado TLS (`cert1.pem` + `key.pem`)
-* Validação com CA bundle (`ca_bundle.crt`)
-* Obtenção do `client_token`
+> ⚠️ A integração com AWS S3 via HashiCorp Vault está atualmente desabilitada (código comentado). O script atualmente apenas lê e baixa os arquivos do bucket OBS.
 
----
+Fluxo planejado:
 
-### Obtenção de credenciais AWS
-
-* Requisição ao Vault com `client_token`
-* Retorna `AccessKey`, `SecretKey` e `SecurityToken` temporários
-
----
-
-### Upload para AWS S3
-
-Operações realizadas:
-
-1. Verifica existência do CSV no S3 (`head_object`)
-2. Caso não exista:
-
-   * Upload do CSV
-   * Upload do JSON
-
-3. Limpeza dos arquivos temporários
+* Autenticação no Vault via certificado TLS (`cert.pem` + `key.pem`)
+* Obtenção de credenciais AWS temporárias (`AccessKey`, `SecretKey`, `SecurityToken`)
+* Upload do CSV e Manifest para o bucket S3
 * Utiliza `boto3`
-* Desabilitado por padrão
+
+---
+
+### Gestão de certificados e chave privada (desabilitado)
+
+> ⚠️ O download de certificados do OBS e a obtenção da chave privada via CSMS estão atualmente desabilitados (código comentado).
+
+Fluxo planejado:
+
+* Download de `cert.pem` e `ca_bundle.crt` do bucket OBS (diretório `certs/`)
+* Obtenção do conteúdo de `key.pem` via **CSMS** (Cloud Secret Management Service)
+* Escrita local dos arquivos para autenticação no Vault
 
 ---

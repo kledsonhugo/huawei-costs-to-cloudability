@@ -138,12 +138,15 @@ In the **IAM** service, select the **Permissions > Policies/Roles** menu, click 
                      "kms:dek:decrypt"
                  ],
                  "Resource": [
+                     "KMS:*:*:KeyId:<MASTER_ACCOUNT_KMS_KEY_ID>",
                      "KMS:*:*:KeyId:<CENTRALIZED_ACCOUNT_KMS_KEY_ID>"
                  ]
              }
          ]
      }
      ```
+
+   > The `MASTER_ACCOUNT_KMS_KEY_ID` is required for the function to decrypt objects from the source bucket (SSE-KMS). Without this permission, downloads return error 403.
 
 2. VPC
 
@@ -230,6 +233,18 @@ Authorize the **Agency** for the policies below:
 - `policy-cloudability-obs-master-readonly`
 - `policy-cloudability-obs-target-readwrite`
 
+## CSMS
+
+In the **Data Encryption Workshop** service, select the **Cloud Secret Management Service** menu, click **Create Secret**, and enter the configuration values.
+
+Parameter:
+
+- Secret Name: `csms-cloudability-key`
+- Secret Type: `Text`
+- Secret Value: `<contents of key.pem>`
+
+> The private key contents (`key.pem`) are stored as a secret in CSMS and retrieved at runtime by the `fg-cloudability-s3` function.
+
 ## FunctionGraph
 
 ### Function creation
@@ -240,7 +255,7 @@ Parameter:
 
 - Function Type: `Event Function`
 - Function Name: `fg-cloudability`
-- Agency: `fg-cloudability`
+- Agency: `agency-cloudability-fg`
 - Runtime: `Python 3.9`
 - Public Access: `Disabled`
 - VPC Access: `Enabled`
@@ -262,11 +277,12 @@ In the **Configuration** menu, adjust the configuration values.
     - `0 6 * * * ?`
 - Environment Variables:
 
-  | Variable          | Example Value                              | Description            |
-  |-------------------|-----------------------------------------------|----------------------|
-  | `SOURCE_BUCKET`   | `<OBS_MASTER_BUCKET>`                  | Source Bucket OBS    |
-  | `TARGET_BUCKET`   | `<OBS_TARGET_BUCKET>`                  | Target Bucket OBS    |
-  | `OBS_ENDPOINT`    | `https://obs.<REGION>.myhuaweicloud.com`   | Endpoint OBS         |
+  | Variable            | Example Value                            | Description                        |
+  |---------------------|---------------------------------------------|----------------------------------|
+  | `OBS_ENDPOINT`      | `https://obs.<REGION>.myhuaweicloud.com`   | OBS Endpoint                     |
+  | `OBS_SOURCE_BUCKET` | `<OBS_MASTER_BUCKET>`                       | Source OBS bucket (Master Account) |
+  | `OBS_TARGET_BUCKET` | `<OBS_TARGET_BUCKET>`                       | Target OBS bucket              |
+  | `S3_BUCKET`         | `<S3_BUCKET>`                               | S3 bucket on AWS (referenced in metadata) |
 
 ---
 
@@ -276,7 +292,7 @@ Upload the `index.py` code and execute the function.
 
 ## FunctionGraph S3
 
-Function responsible for reading files from the target OBS bucket and sending them to the S3 bucket on AWS.
+Function responsible for reading files from the target OBS bucket. The upload to the S3 bucket on AWS is currently disabled.
 
 ### Function creation
 
@@ -308,34 +324,41 @@ In the **Configuration** menu, adjust the configuration values.
     - `0 7 * * * ?`
 - Environment Variables:
 
-  | Variable              | Example Value                                      | Description                          |
-  |-----------------------|-------------------------------------------------------|------------------------------------|
-  | `OBS_ENDPOINT` | `https://obs.<REGION>.myhuaweicloud.com` | OBS Endpoint |
-  | `OBS_SOURCE_BUCKET` | `<OBS_TARGET_BUCKET>` | Source OBS bucket (with CSV+JSON) |
-  | `S3_BUCKET` | `<S3_BUCKET>` | Destination S3 bucket on AWS |
-  | `VAULT_URL` | `https://<vault_domain>/v1/auth/cert/login` | Vault login URL |
-  | `VAULT_AWS_PATH`      | `https://<vault_domain>/v1/aws/creds/<role>` | Vault AWS creds path |
-  | `AWS_REGION`          | `<AWS_REGION>`                                           | AWS Region                         |
+  | Variable            | Example Value                                      | Description                          |
+  |---------------------|-------------------------------------------------------|------------------------------------|
+  | `OBS_ENDPOINT`      | `https://obs.<REGION>.myhuaweicloud.com`             | OBS Endpoint                       |
+  | `OBS_BUCKET`        | `<OBS_TARGET_BUCKET>`                                 | Source OBS bucket (with CSV+JSON) |
+  | `CSMS_SECRET_NAME`  | `csms-cloudability-key`                               | CSMS secret name             |
+  | `CSMS_REGION`       | `<REGION>`                                            | CSMS region                     |
+  | `CSMS_ENDPOINT`     | `https://kms.<REGION>.myhuaweicloud.com`             | CSMS endpoint (VPC endpoint)    |
+  | `CSMS_PROJECT_ID`   | `<PROJECT_ID>`                                        | CSMS project ID                 |
+  | `CERT_DIR`          | `/tmp/certificado`                                    | Local certificate directory   |
+  | `CERT_FILE`         | `cert.pem`                                            | Certificate filename     |
+  | `KEY_FILE`          | `key.pem`                                             | Private key filename   |
+  | `CA_BUNDLE`         | `ca_bundle.crt`                                       | CA bundle filename                  |
+
+> ⚠️ Variables `VAULT_URL`, `VAULT_AWS_PATH`, `AWS_REGION`, and `S3_BUCKET` are not currently used (S3 upload disabled).
 
 ---
 
 ### Certificates
 
-Include the certificate files in the `certificado/` directory of the function code:
+The certificates (`cert.pem` and `ca_bundle.crt`) must be stored in the source OBS bucket, in the `certs/` directory:
 
 ```
-certificado/
-├── cert1.pem        # Client TLS certificate
-├── key.pem          # Client private key
+certs/
+├── cert.pem        # Client TLS certificate
 └── ca_bundle.crt    # CA bundle for Vault server validation
 ```
 
-The mounted path in the function will be `/opt/function/code/certificado/`.
+The private key (`key.pem`) is retrieved via **CSMS** at runtime and is not stored in the bucket.
+
+> ⚠️ Certificate download from OBS and key retrieval via CSMS are currently disabled (commented code).
 
 ---
 
 ### Function deployment
 
-Upload the `index_s3.py` code and the `certificado/` directory, and execute the function.
+Upload the `s3.py` code and execute the function.
 
 ---

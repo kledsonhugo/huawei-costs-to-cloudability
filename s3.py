@@ -602,28 +602,12 @@ def handler(event, context):
         # s3_bucket = os.getenv("S3_BUCKET")
 
         missing = []
-        if not obs_endpoint:
-            missing.append("OBS_ENDPOINT")
         if not obs_source_bucket:
             missing.append("OBS_BUCKET")
-        if not csms_region:
-            missing.append("CSMS_REGION")
-        if not csms_endpoint:
-            missing.append("CSMS_ENDPOINT")
         if not csms_project_id:
             missing.append("CSMS_PROJECT_ID")
         if not csms_secret_name:
             missing.append("CSMS_SECRET_NAME")
-        if not cert_dir:
-            missing.append("CERT_DIR")
-        if not cert_file:
-            missing.append("CERT_FILE")
-        if not key_file:
-            missing.append("KEY_FILE")
-        if not ca_bundle:
-            missing.append("CA_BUNDLE")
-        # if not aws_region:
-        #     missing.append("AWS_REGION")
         # if not s3_bucket:
         #     missing.append("S3_BUCKET")
         # if not vault_url:

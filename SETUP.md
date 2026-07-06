@@ -86,13 +86,24 @@ Parâmetros:
 - Subnet Name: `subnet-cloudability`
 - Subnet IPv4 CIDR Block: `10.0.1.0/24`
 
-## VPC Endpoint
+## VPC Endpoint para OBS
 
 No serviço **VPC** selecione o menu **VPC Endpoints**, clique em **Buy VPC Endpoint** e digite os valores de configuração.
 
 Parâmetros:
 
 - Service List: `com.myhuaweicloud.<REGION>.obs`
+- VPC: `vpc-cloudability`
+- Route Table: `rtb-vpc-cloudability`
+
+## VPC Endpoint para KMS
+
+Novamente clique em **Buy VPC Endpoint** e digite os valores de configuração.
+
+Parâmetros:
+
+- Service List: `com.myhuaweicloud.<REGION>.kms`
+- Create a Private Domain Name: `selecionado`
 - VPC: `vpc-cloudability`
 - Route Table: `rtb-vpc-cloudability`
 
@@ -138,12 +149,15 @@ No serviço **IAM** selecione o menu **Permissions > Policies/Roles**, clique em
                      "kms:dek:decrypt"
                  ],
                  "Resource": [
+                     "KMS:*:*:KeyId:<KMS_KEY_ID_CONTA_MASTER>",
                      "KMS:*:*:KeyId:<KMS_KEY_ID_CONTA_CENTRALIZADA>"
                  ]
              }
          ]
      }
      ```
+
+   > O `KMS_KEY_ID_CONTA_MASTER` é obrigatório para que a function possa descriptografar objetos do bucket de origem (SSE-KMS). Sem essa permissão, o download retorna erro 403.
 
 2. VPC
 
@@ -240,12 +254,18 @@ Parâmetro:
 
 - Function Type: `Event Function`
 - Function Name: `fg-cloudability`
-- Agency: `fg-cloudability`
+- Agency: `agency-cloudability-fg`
 - Runtime: `Python 3.9`
 - Public Access: `Disabled`
 - VPC Access: `Enabled`
 - VPC: `vpc-cloudability`
 - Subnet: `subnet-cloudability`
+- Secure Access: `enabled`
+- Collect Logs: `enabled`
+- Log Group: `create or select existent`
+- Log Stream: `create or select existent`
+- Static Encryption Code with KMS: `Customer master key (CMK)` 
+- Customer master key (CMK): `kms-cloudability-obs-target`
 
 ---
 
@@ -262,11 +282,11 @@ No menu **Configuration** ajuste os valores de configuração.
     - `0 6 * * * ?`
 - Environment Variables:
 
-  | Variável          | Exemplo de Valor                              | Descrição            |
-  |-------------------|-----------------------------------------------|----------------------|
-  | `SOURCE_BUCKET`   | `<OBS_MASTER_BUCKET>`                  | Source Bucket OBS    |
-  | `TARGET_BUCKET`   | `<OBS_TARGET_BUCKET>`                  | Target Bucket OBS    |
-  | `OBS_ENDPOINT`    | `https://obs.<REGION>.myhuaweicloud.com`   | Endpoint OBS         |
+  | Variável            | Exemplo de Valor      | Descrição                                  |
+  |---------------------|-----------------------|--------------------------------------------|
+  | `OBS_SOURCE_BUCKET` | `<OBS_MASTER_BUCKET>` | Bucket OBS de origem (Conta Master)        |
+  | `OBS_TARGET_BUCKET` | `<OBS_TARGET_BUCKET>` | Bucket OBS de destino (Conta Centralizada) |
+  | `S3_BUCKET`         | `<S3_BUCKET>`         | Bucket S3 na AWS (referência no metadado)  |
 
 ---
 
@@ -276,7 +296,82 @@ Subir código `index.py` e executar a function.
 
 ## FunctionGraph S3
 
-Function responsável por ler os arquivos do bucket OBS de destino e enviá-los para o bucket S3 na AWS.
+Function responsável por ler os arquivos do bucket OBS de destino. O envio para o bucket S3 na AWS está atualmente desabilitado.
+
+### Private Key
+
+No serviço **Data Encryption Workshop** selecione o menu **Cloud Secret Management Service**, e em **Secrets** clique em **Create Secret** e digite os valores de configuração.
+
+Parâmetro:
+
+- Secret Name: `csms-cloudability-key`
+- Secret Value: `Plaintext` e cole o conteúdo do seu arquivo .pem
+- KMS Encryption Key: `kms-cloudability-target`
+
+> O conteúdo da chave privada é armazenado como secret no CSMS e recuperado em runtime pela function `fg-cloudability-s3`.
+
+---
+
+### Certificados
+
+No serviço **OBS** selecione o bucket criado anteriormente, crie o diretório **certs** e faça upload dos arquivos **cert.pem** e **ca_bundle.crt**.
+
+---
+
+### Dependência externa da function
+
+Ainda no bucket OBS crie o diretório **deps** e faça upload do arquivo **boto3.zip**.
+
+---
+
+### Policy para FunctionGraph
+
+No serviço **IAM** selecione o menu **Permissions > Policies/Roles**, clique em **Create Custom Policy** e crie a policy abaixo.
+
+1. CSMS
+
+   - Policy Name: `policy-cloudability-csms-readonly`
+   - Policy Content:
+     ```
+     {
+        "Version": "1.1",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "csms:secret:list"
+                ]
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "csms:secret:get",
+                    "csms:secretVersion:list",
+                    "csms:secretVersion:get"
+                ],
+                "Resource": [
+                    "CSMS:*:*:secretName:csms-cloudability-key"
+                ]
+            }
+        ]
+     }
+     ```
+
+selecione o menu **Agencies**, clique em **agency-cloudability-fg** e na aba **Permissions** adicione a nova policy criada.
+
+---
+
+### Dependência da Function
+
+No serviço **FunctionGraph**, em **Dependencies** clique em **Create Dependency**.
+
+Parâmetros:
+
+- Name: `boto3`
+- Runtime: `Python 3.9`
+- OBS Link URL: `url do objeto publicado no bucket OBS em deps`
+
+---
 
 ### Criação da Function
 
@@ -292,6 +387,12 @@ Parâmetro:
 - VPC Access: `Enabled`
 - VPC: `vpc-cloudability`
 - Subnet: `subnet-cloudability`
+- Secure Access: `enabled`
+- Collect Logs: `enabled`
+- Log Group: `create or select existent`
+- Log Stream: `create or select existent`
+- Static Encryption Code with KMS: `Customer master key (CMK)` 
+- Customer master key (CMK): `kms-cloudability-obs-target`
 
 ---
 
@@ -300,7 +401,7 @@ Parâmetro:
 No menu **Configuration** ajuste os valores de configuração.
 
 - Basic Settings
-  - Execution Timeout (s): `60`
+  - Execution Timeout (s): `30`
 - Trigger
   - Trigger Type: `Time`
   - Timer Name: `timer-cloudability-s3`
@@ -308,34 +409,21 @@ No menu **Configuration** ajuste os valores de configuração.
     - `0 7 * * * ?`
 - Environment Variables:
 
-  | Variável              | Exemplo de Valor                                      | Descrição                          |
-  |-----------------------|-------------------------------------------------------|------------------------------------|
-  | `OBS_ENDPOINT` | `https://obs.<REGION>.myhuaweicloud.com` | Endpoint OBS |
-  | `OBS_SOURCE_BUCKET` | `<OBS_TARGET_BUCKET>` | Bucket OBS de origem (com CSV+JSON) |
-  | `S3_BUCKET` | `<S3_BUCKET>` | Bucket S3 de destino na AWS |
-  | `VAULT_URL` | `https://<vault_domain>/v1/auth/cert/login` | URL login Vault |
-  | `VAULT_AWS_PATH`      | `https://<vault_domain>/v1/aws/creds/<role>` | Path creds AWS Vault |
-  | `AWS_REGION`          | `<AWS_REGION>`                                           | Região AWS                         |
+  | Variável            | Descrição              |
+  |---------------------|------------------------|
+  | `OBS_BUCKET`        | Bucket OBS de origem   |
+  | `CSMS_SECRET_NAME`  | Nome do secret no CSMS |
+  | `CSMS_PROJECT_ID`   | Project ID do CSMS     |
+  | `VAULT_URL`         | URL do Vault na AWS    |
+  | `VAULT_AWS_PATH`    | Path do Vault na AWS   |
+  | `S3_BUCKET`         | S3 Bucket              |
 
----
-
-### Certificados
-
-Incluir os arquivos de certificado no diretório `certificado/` do código da function:
-
-```
-certificado/
-├── cert1.pem        # Certificado TLS do cliente
-├── key.pem          # Chave privada do cliente
-└── ca_bundle.crt    # CA bundle para validação do servidor Vault
-```
-
-O caminho montado na function será `/opt/function/code/certificado/`.
+No menu **Code**, em **Dependencies**, clique **Add** e inclua a dependência privada **boto3** e a dependência pública **huaweicloudsdkcsms**.
 
 ---
 
 ### Deploy da Function
 
-Subir código `index_s3.py` e o diretório `certificado/`, e executar a function.
+Subir código `s3.py` e executar a function.
 
 ---

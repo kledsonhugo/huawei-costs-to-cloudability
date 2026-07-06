@@ -306,14 +306,12 @@ def handler(event, context):
     obs_client = None
 
     try:
-        endpoint = os.getenv('OBS_ENDPOINT')
-        source_bucket = os.getenv('OBS_SOURCE_BUCKET')
-        target_bucket = os.getenv('OBS_TARGET_BUCKET')
-        s3_bucket = os.getenv('S3_BUCKET')
+        endpoint = os.getenv("OBS_ENDPOINT", "https://obs.sa-brazil-1.myhuaweicloud.com")
+        source_bucket = os.getenv("OBS_SOURCE_BUCKET")
+        target_bucket = os.getenv("OBS_TARGET_BUCKET")
+        s3_bucket = os.getenv("S3_BUCKET")
 
         missing = []
-        if not endpoint:
-            missing.append("OBS_ENDPOINT")
         if not source_bucket:
             missing.append("OBS_SOURCE_BUCKET")
         if not target_bucket:
