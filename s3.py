@@ -215,18 +215,15 @@ def fetch_key_from_csms(context, secret_name, region_id="sa-east-1", endpoint=No
     credentials = BasicCredentials(ak=ak, sk=sk).with_security_token(tk)
     if project_id:
         credentials = credentials.with_project_id(project_id)
-        logger.info(f"project_id setado explicitamente (sem chamada ao IAM)")
 
     try:
         csms_region = CsmsRegion.value_of(region_id)
         if endpoint:
             csms_region.endpoints = [endpoint]
-            logger.info(f"Endpoint CSMS sobrescrito (VPC): {endpoint}")
 
         http_config = HttpConfig.get_default_config()
         http_config.timeout = 10
         http_config.retry_total = 0
-        logger.info(f"HTTP config aplicado - timeout=10s, retry=0")
 
         csms_client = CsmsClient.new_builder() \
             .with_http_config(http_config) \
@@ -265,7 +262,6 @@ def write_key_file(key_content, key_path):
     key_dir = os.path.dirname(key_path)
     if not os.path.exists(key_dir):
         os.makedirs(key_dir)
-        logger.info(f"Diretório criado - path={key_dir}")
 
     try:
         with open(key_path, "w") as f:
