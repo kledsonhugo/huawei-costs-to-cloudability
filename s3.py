@@ -356,8 +356,6 @@ def list_obs_objects(obs_client, bucket):
 # Retorna dict com 'csv_key', 'json_key' e 'epoch'.
 # =========================
 def find_latest_artifact_pair(objects):
-    """Retorna o par CSV+Manifest mais recente encontrado na lista de objetos."""
-
     logger.info(f"Procurando par CSV+JSON mais recente de {len(objects)} objetos")
 
     csv_files = [o for o in objects if o["key"].endswith(".csv")]
@@ -368,17 +366,13 @@ def find_latest_artifact_pair(objects):
     if not csv_files:
         raise Exception("Nenhum arquivo CSV encontrado no bucket OBS")
 
-    # Ordena CSVs pela key decrescente (contém epoch no path)
     csv_files_sorted = sorted(csv_files, key=lambda x: x["key"], reverse=True)
 
     for csv_obj in csv_files_sorted:
         csv_key = csv_obj["key"]
-        # CSV: .../<epoch>.csv  ->  JSON: .../<epoch>-Manifest.json
         manifest_key = csv_key.replace(".csv", "-Manifest.json")
 
         if manifest_key in manifest_files:
-            # Extrai o epoch do nome do arquivo
-            # Formato: Huawei/<report_period>/<epoch>/<epoch>.csv
             parts = csv_key.split("/")
             epoch = parts[-1].replace(".csv", "")
             logger.info(f"Par válido encontrado - epoch={epoch}")
@@ -396,7 +390,6 @@ def find_latest_artifact_pair(objects):
 # Baixa um objeto do bucket OBS para o caminho local especificado.
 # =========================
 def download_from_obs(obs_client, bucket, key, local_path):
-
     logger.info(f"Iniciando download - bucket={bucket}, key={key}, local_path={local_path}")
 
     try:
@@ -422,14 +415,10 @@ def download_from_obs(obs_client, bucket, key, local_path):
 
 
 # =========================
-# Vault: Authenticate with certificate
-# Autentica no HashiCorp Vault usando autenticação por certificado TLS.
+# Vault: Autentica no HashiCorp Vault usando certificado TLS.
 # Retorna o client_token do Vault.
 # =========================
 # def vault_login(vault_url, cert_file, key_file, ca_bundle):
-#
-#     logger.info("Autenticando no Vault")
-#
 #     try:
 #         resp = requests.post(
 #             vault_url,
@@ -459,14 +448,10 @@ def download_from_obs(obs_client, bucket, key, local_path):
 #     return client_token
 
 # =========================
-# Vault: Get AWS credentials
-# Obtém credenciais AWS temporárias do Vault.
+# Vault: Obtém credenciais AWS temporárias do Vault.
 # Retorna dict com 'AccessKey', 'SecretKey', 'SecurityToken'.
 # =========================
 # def get_aws_credentials_from_vault(vault_aws_path, client_token, ca_bundle):
-#
-#     logger.info(f"Obtendo credenciais AWS do Vault: path={vault_aws_path}")
-#
 #     try:
 #         resp = requests.post(
 #             vault_aws_path,
@@ -495,7 +480,6 @@ def download_from_obs(obs_client, bucket, key, local_path):
 #     if not access_key or not secret_key:
 #         raise Exception("Credenciais AWS incompletas na resposta do Vault")
 #
-#     logger.info("Credenciais AWS obtidas com sucesso")
 #     return {
 #         "AccessKey": access_key,
 #         "SecretKey": secret_key,
@@ -503,13 +487,9 @@ def download_from_obs(obs_client, bucket, key, local_path):
 #     }
 
 # =========================
-# AWS S3: Create client
-# Cria cliente boto3 S3 com credenciais do Vault.
+# AWS S3: Cria cliente boto3 S3 com credenciais do Vault.
 # =========================
 # def create_s3_client(aws_creds, region):
-#
-#     logger.info(f"Criando cliente S3 para região {region}")
-#
 #     try:
 #         session = boto3.Session(
 #             aws_access_key_id=aws_creds["AccessKey"],
@@ -518,47 +498,24 @@ def download_from_obs(obs_client, bucket, key, local_path):
 #             region_name=region
 #         )
 #         client = session.client("s3")
-#         logger.info("Cliente S3 criado com sucesso")
 #         return client
 #     except Exception as e:
 #         raise
 
 # =========================
-# AWS S3: Check if object exists
-# Verifica se um objeto já existe no S3.
-# =========================
-# def s3_object_exists(s3_client, bucket, key):
-#
-#     logger.info(f"Verificando existência do objeto S3: {key}")
-#
-#     try:
-#         s3_client.head_object(Bucket=bucket, Key=key)
-#         logger.info(f"Objeto encontrado: {key}")
-#         return True
-#     except ClientError as e:
-#         error_code = e.response["Error"]["Code"]
-#         if error_code == "404":
-#             return False
-#         raise
-#     except Exception as e:
-#         logger.info(f"Exceção ao verificar existência: {e}")
-#         return False
-
-# =========================
-# AWS S3: Upload file
-# Faz upload de um arquivo local para o S3.
+# AWS S3: Upload arquivo local para o S3.
+# O 'key' preserva a mesma estrutura de diretórios do bucket de origem:
+#   Huawei/<report_period>/<epoch>/<filename>
 # =========================
 # def upload_to_s3(s3_client, bucket, key, local_path):
-#
 #     if not os.path.exists(local_path):
 #         raise Exception(f"Arquivo não existe: {local_path}")
-#
+
 #     file_size = os.path.getsize(local_path)
 #     logger.info(f"Upload S3: bucket={bucket}, key={key}, size={file_size}")
-#
+
 #     try:
 #         s3_client.upload_file(local_path, bucket, key)
-#         logger.info(f"Upload S3 OK: {key}")
 #     except NoCredentialsError:
 #         raise Exception("Credenciais AWS não encontradas para upload S3")
 #     except ClientError as s3_err:
@@ -620,38 +577,38 @@ def handler(event, context):
 
         # --- Sanity Check ---
 
-        # logger.info("[DEBUG 1/4] Valida conectividade com OBS endpoint")
+        # logger.info("[DEBUG 1/3] Valida conectividade com OBS endpoint")
         # diagnose_obs_network(obs_endpoint)
 
-        # logger.info("[DEBUG 2/4] Valida conectividade com OBS bucket")
+        # logger.info("[DEBUG 2/3] Valida conectividade com OBS bucket")
         # diagnose_obs_bucket_network(obs_endpoint, obs_source_bucket)
 
-        # logger.info("[DEBUG 3/4] Valida conectividade com o endpoint do CSMS")
+        # logger.info("[DEBUG 3/3] Valida conectividade com o endpoint do CSMS")
         # diagnose_csms_network(csms_region, endpoint=csms_endpoint)
 
 
         # --- Início do processo ---
 
         # 1. Cria cliente OBS ---
-        logger.info("[STEP 1/11] Criando cliente OBS")
+        logger.info("[STEP 1/10] Criando cliente OBS")
         obs_client = create_obs_client(context, obs_endpoint)
 
         # 2. Download dos certificados do bucket OBS ---
-        logger.info("[STEP 2/11] Baixando certificados do bucket OBS")
+        logger.info("[STEP 2/10] Baixando certificados do bucket OBS")
         # download_certs_from_obs(obs_client, obs_source_bucket, cert_dir, cert_file, ca_bundle)
 
         # 3. Escreve key.pem a partir do secret no CSMS ---
-        logger.info("[STEP 3/11] Escrevendo key.pem a partir do CSMS")
+        logger.info("[STEP 3/10] Escrevendo key.pem a partir do CSMS")
         # key_local_path = os.path.join(cert_dir, key_file)
         # key_content = fetch_key_from_csms(context, csms_secret_name, csms_region, endpoint=csms_endpoint, project_id=csms_project_id)
         # write_key_file(key_content, key_local_path)
 
         # 4. Lista objetos de custos no bucket OBS ---
-        logger.info("[STEP 4/11] Lista objetos no bucket OBS")
+        logger.info("[STEP 4/10] Lista objetos no bucket OBS")
         objects = list_obs_objects(obs_client, obs_source_bucket)
 
         # 5. Encontra par CSV+JSON mais recente ---
-        logger.info("[STEP 5/11] Selecionando par CSV + Manifest mais recente")
+        logger.info("[STEP 5/10] Selecionando par CSV + Manifest mais recente")
         artifact = find_latest_artifact_pair(objects)
         logger.info(
             f"csv: {artifact['csv_key']}, "
@@ -660,51 +617,28 @@ def handler(event, context):
         )
 
         # 6. Download dos arquivos do OBS ---
-        logger.info("[STEP 6/11] Baixando arquivos do OBS")
+        logger.info("[STEP 6/10] Baixando arquivos do OBS")
         csv_local = f"/tmp/{artifact['epoch']}.csv"
         json_local = f"/tmp/{artifact['epoch']}-Manifest.json"
         download_from_obs(obs_client, obs_source_bucket, artifact["csv_key"], csv_local)
         download_from_obs(obs_client, obs_source_bucket, artifact["json_key"], json_local)
 
         # 7. Autentica no Vault ---
-        logger.info("[STEP 7/11] Autenticando no Vault")
+        logger.info("[STEP 7/10] Autenticando no Vault")
         # client_token = vault_login(vault_url, CERT_FILE, KEY_FILE, CA_BUNDLE)
 
         # 8. Obtém credenciais AWS do Vault ---
-        logger.info("[STEP 8/11] Obtendo credenciais AWS do Vault")
+        logger.info("[STEP 8/10] Obtendo credenciais AWS do Vault")
         # aws_creds = get_aws_credentials_from_vault(vault_aws_path, client_token, CA_BUNDLE)
 
         # 9. Cria cliente S3 ---
-        logger.info("[STEP 9/11] Criando cliente S3")
+        logger.info("[STEP 9/10] Criando cliente S3")
         # s3_client = create_s3_client(aws_creds, aws_region)
 
-        # 10. Verifica se CSV já existe no S3 ---
-        logger.info("[STEP 10/11] Verificando se CSV já existe no S3")
-        # csv_exists = s3_object_exists(s3_client, s3_bucket, artifact["csv_key"])
-        #
-        # if csv_exists:
-        #     result = {
-        #         "status": "exists",
-        #         "csv_key": artifact["csv_key"],
-        #         "json_key": artifact["json_key"]
-        #     }
-        # else:
-        #     # 11. Upload CSV e JSON para S3 ---
-        logger.info("[STEP 11/11] Enviando arquivos para o S3")
-        #     upload_to_s3(s3_client, s3_bucket, artifact["csv_key"], csv_local)
-        #     upload_to_s3(s3_client, s3_bucket, artifact["json_key"], json_local)
-        #
-        #     result = {
-        #         "status": "uploaded",
-        #         "csv_key": artifact["csv_key"],
-        #         "json_key": artifact["json_key"]
-        #     }
-        #
-        #     logger.info(
-        #         f"Upload concluído - CSV: {artifact['csv_key']}, "
-        #         f"JSON: {artifact['json_key']}"
-        #     )
-
+        # 10. Upload CSV e JSON para o S3 ---
+        logger.info("[STEP 10/10] Enviando arquivos para o S3")
+        # upload_to_s3(s3_client, s3_bucket, artifact["csv_key"], csv_local)
+        # upload_to_s3(s3_client, s3_bucket, artifact["json_key"], json_local)
 
         logger.info("===== HANDLER CONCLUÍDO COM SUCESSO =====")
 
