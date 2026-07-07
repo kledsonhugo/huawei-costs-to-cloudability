@@ -74,7 +74,6 @@ def diagnose_obs_network(obs_endpoint):
 # ---------------------------------------------------------------------------
 # Diagnóstico de rede: OBS bucket
 # Testa DNS, TCP connect e TLS handshake para o host do endpoint e do bucket
-# (formato <bucket>.<endpoint_host>).
 # ---------------------------------------------------------------------------
 def diagnose_obs_bucket_network(obs_endpoint, bucket):
     base_host = urlparse(obs_endpoint).hostname
@@ -111,7 +110,6 @@ def diagnose_obs_bucket_network(obs_endpoint, bucket):
 # ---------------------------------------------------------------------------
 # Diagnóstico de rede: CSMS
 # Testa DNS, TCP connect e TLS handshake com o endpoint do CSMS da Huawei Cloud.
-# Se 'endpoint' for informado (VPC endpoint privado), usa-o em vez do DNS público.
 # ---------------------------------------------------------------------------
 def diagnose_csms_network(region_id, endpoint=None):
     if endpoint:
@@ -149,11 +147,8 @@ def diagnose_csms_network(region_id, endpoint=None):
 # =========================
 # OBS: Criar cliente
 # Cria um cliente OBS com credenciais temporárias do contexto da FunctionGraph.
-# Configura path_style, timeout e max_retry_count para resiliência.
 # =========================
 def create_obs_client(context, endpoint):
-    logger.info(f"Criando cliente OBS - endpoint={endpoint}")
-
     ak = context.getSecurityAccessKey()
     sk = context.getSecuritySecretKey()
     tk = context.getSecurityToken()
@@ -170,8 +165,6 @@ def create_obs_client(context, endpoint):
         timeout=10,
         max_retry_count=2
     )
-
-    logger.info("Cliente OBS criado com sucesso")
     return client
 
 
@@ -181,11 +174,8 @@ def create_obs_client(context, endpoint):
 # para o diretório local especificado.
 # ---------------------------------------------------------------------------
 def download_certs_from_obs(obs_client, bucket, cert_dir, cert_file, ca_bundle, obs_prefix="certs/"):
-    logger.info(f"Iniciando download de certificados - bucket={bucket}, prefix={obs_prefix}")
-
     if not os.path.exists(cert_dir):
         os.makedirs(cert_dir)
-        logger.info(f"Diretório criado - path={cert_dir}")
 
     cert_files = [
         (f"{obs_prefix}{cert_file}",  os.path.join(cert_dir, cert_file)),
@@ -209,17 +199,12 @@ def download_certs_from_obs(obs_client, bucket, cert_dir, cert_file, ca_bundle, 
         else:
             raise Exception(f"Certificado não foi criado: {local_path}")
 
-    logger.info("Todos os certificados baixados com sucesso")
-
 
 # ---------------------------------------------------------------------------
 # KEY: Buscar conteúdo do key.pem no CSMS
 # O conteúdo da chave privada (key.pem) é armazenado como secret no CSMS.
-# Usa o SDK oficial da Huawei Cloud com credenciais temporárias do contexto.
 # ---------------------------------------------------------------------------
 def fetch_key_from_csms(context, secret_name, region_id="sa-east-1", endpoint=None, project_id=None):
-    logger.info(f"Buscando secret no CSMS - secret={secret_name}, region={region_id}, endpoint={endpoint}, project_id={'set' if project_id else 'None'}")
-
     ak = context.getSecurityAccessKey()
     sk = context.getSecuritySecretKey()
     tk = context.getSecurityToken()
@@ -277,8 +262,6 @@ def fetch_key_from_csms(context, secret_name, region_id="sa-east-1", endpoint=No
 # Escreve o conteúdo da chave privada obtido do CSMS em um arquivo local.
 # ---------------------------------------------------------------------------
 def write_key_file(key_content, key_path):
-    logger.info(f"Escrevendo key.pem - target={key_path}")
-
     key_dir = os.path.dirname(key_path)
     if not os.path.exists(key_dir):
         os.makedirs(key_dir)
@@ -298,8 +281,6 @@ def write_key_file(key_content, key_path):
 # OBS: Listar objetos
 # Lista objetos de custos do bucket OBS filtrando pelo período de relatório atual
 # (formato Huawei/YYYYMM01-YYYY(M+1)01/).
-# Ignora objetos de tamanho zero.
-# Retorna lista de dicts com 'key', 'size' e 'lastModified'.
 # =========================
 def list_obs_objects(obs_client, bucket):
     now = datetime.now(timezone.utc)
@@ -313,11 +294,7 @@ def list_obs_objects(obs_client, bucket):
     current_report_period = f"{start_period}-{end_period}"
     prefix = f"Huawei/{current_report_period}/"
 
-    logger.info(f"Listando objetos - bucket={bucket}, prefix={prefix}")
-
     resp = obs_client.listObjects(bucket, prefix=prefix)
-
-    logger.info(f"Status da listagem: {resp.status}")
 
     if resp.status >= 300 or not resp.body.contents:
         raise Exception(
@@ -335,8 +312,6 @@ def list_obs_objects(obs_client, bucket):
             "lastModified": content.lastModified
         })
 
-    logger.info(f"Total de objetos válidos: {len(objects)}")
-
     if not objects:
         raise Exception(
             f"Nenhum objeto encontrado - bucket={bucket}, prefix={prefix}"
@@ -346,28 +321,20 @@ def list_obs_objects(obs_client, bucket):
 
 
 # =========================
-# OBS: Encontrar par CSV+Manifest mais recente
-# Dada uma lista de objetos, encontra o par CSV+Manifest mais recente.
+# OBS: Encontrar par CSV + Manifest mais recente
 # Os arquivos seguem o padrão:
 #   Huawei/<report_period>/<epoch>/<epoch>.csv
 #   Huawei/<report_period>/<epoch>/<epoch>-Manifest.json
-#     report_period = YYYYMM01-YYYY(M+1)01
-#     epoch         = epoch time do upload
-# Retorna dict com 'csv_key', 'json_key' e 'epoch'.
 # =========================
 def find_latest_artifact_pair(objects):
-    logger.info(f"Procurando par CSV+JSON mais recente de {len(objects)} objetos")
-
     csv_files = [o for o in objects if o["key"].endswith(".csv")]
     manifest_files = {o["key"] for o in objects if o["key"].endswith("-Manifest.json")}
 
     logger.info(f"CSVs encontrados: {len(csv_files)}, Manifests encontrados: {len(manifest_files)}")
-
     if not csv_files:
         raise Exception("Nenhum arquivo CSV encontrado no bucket OBS")
 
     csv_files_sorted = sorted(csv_files, key=lambda x: x["key"], reverse=True)
-
     for csv_obj in csv_files_sorted:
         csv_key = csv_obj["key"]
         manifest_key = csv_key.replace(".csv", "-Manifest.json")
@@ -390,8 +357,6 @@ def find_latest_artifact_pair(objects):
 # Baixa um objeto do bucket OBS para o caminho local especificado.
 # =========================
 def download_from_obs(obs_client, bucket, key, local_path):
-    logger.info(f"Iniciando download - bucket={bucket}, key={key}, local_path={local_path}")
-
     try:
         resp = obs_client.getObject(bucket, key, downloadPath=local_path)
     except Exception as sdk_err:
@@ -409,7 +374,6 @@ def download_from_obs(obs_client, bucket, key, local_path):
 
     if os.path.exists(local_path):
         file_size = os.path.getsize(local_path)
-        logger.info(f"Download concluído - key={key}, size={file_size} bytes")
     else:
         raise Exception(f"Arquivo não foi criado após download: {local_path}")
 
