@@ -5,9 +5,10 @@ import traceback
 import logging
 from datetime import datetime, timezone
 from obs import ObsClient
-# import boto3
-# from botocore.exceptions import NoCredentialsError, ClientError
-# import requests
+import boto3
+from botocore.config import Config
+from botocore.exceptions import NoCredentialsError, ClientError
+import requests
 from requests import packages
 from urllib3 import disable_warnings
 import socket
@@ -378,114 +379,123 @@ def download_from_obs(obs_client, bucket, key, local_path):
 # Vault: Autentica no HashiCorp Vault usando certificado TLS.
 # Retorna o client_token do Vault.
 # =========================
-# def vault_login(vault_url, cert_file, key_file, ca_bundle):
-#     try:
-#         resp = requests.post(
-#             vault_url,
-#             cert=(cert_file, key_file),
-#             verify=ca_bundle,
-#             json={"name": "cert1"}
-#         )
-#     except Exception as req_err:
-#         raise Exception(f"Erro na requisição de login ao Vault") from req_err
-#
-#     if resp.status_code != 200:
-#         raise Exception(
-#             f"Erro no login Vault - status={resp.status_code}"
-#         )
-#
-#     try:
-#         data = resp.json()
-#     except Exception as json_err:
-#         raise Exception(f"Erro ao fazer parse da resposta Vault") from json_err
-#
-#     client_token = data.get("auth", {}).get("client_token")
-#
-#     if not client_token:
-#         raise Exception("client_token não encontrado na resposta do Vault")
-#
-#     logger.info("Vault login OK")
-#     return client_token
+def vault_login(vault_url, cert_file, key_file, ca_bundle):
+    try:
+        resp = requests.post(
+            vault_url,
+            cert=(cert_file, key_file),
+            verify=ca_bundle,
+            json={}
+        )
+    except Exception as req_err:
+        raise Exception(f"Erro na requisição de login ao Vault") from req_err
+
+    if resp.status_code != 200:
+        raise Exception(
+            f"Erro no login Vault - status={resp.status_code}, body={resp.text}"
+        )
+
+    try:
+        data = resp.json()
+    except Exception as json_err:
+        raise Exception(f"Erro ao fazer parse da resposta Vault") from json_err
+
+    client_token = data.get("auth", {}).get("client_token")
+
+    if not client_token:
+        raise Exception("client_token não encontrado na resposta do Vault")
+
+    logger.info("Vault login OK")
+    return client_token
 
 # =========================
 # Vault: Obtém credenciais AWS temporárias do Vault.
 # Retorna dict com 'AccessKey', 'SecretKey', 'SecurityToken'.
 # =========================
-# def get_aws_credentials_from_vault(vault_aws_path, client_token, ca_bundle):
-#     try:
-#         resp = requests.post(
-#             vault_aws_path,
-#             headers={"X-Vault-Token": client_token},
-#             verify=ca_bundle
-#         )
-#     except Exception as req_err:
-#         raise Exception(f"Erro na requisição de creds AWS ao Vault") from req_err
-#
-#     if resp.status_code != 200:
-#         raise Exception(
-#             f"Erro ao obter creds AWS - status={resp.status_code}"
-#         )
-#
-#     try:
-#         data = resp.json()
-#     except Exception as json_err:
-#         raise Exception(f"Erro ao fazer parse da resposta AWS Vault") from json_err
-#
-#     creds = data.get("data", {})
-#
-#     access_key = creds.get("access_key")
-#     secret_key = creds.get("secret_key")
-#     security_token = creds.get("security_token")
-#
-#     if not access_key or not secret_key:
-#         raise Exception("Credenciais AWS incompletas na resposta do Vault")
-#
-#     return {
-#         "AccessKey": access_key,
-#         "SecretKey": secret_key,
-#         "SecurityToken": security_token
-#     }
+def get_aws_credentials_from_vault(vault_aws_path, client_token, ca_bundle):
+    try:
+        resp = requests.get(
+            vault_aws_path,
+            headers={"X-Vault-Token": client_token},
+            verify=ca_bundle
+        )
+    except Exception as req_err:
+        raise Exception(f"Erro na requisição de creds AWS ao Vault") from req_err
+
+    if resp.status_code != 200:
+        raise Exception(
+            f"Erro ao obter creds AWS - status={resp.status_code}, body={resp.text}"
+        )
+
+    try:
+        data = resp.json()
+    except Exception as json_err:
+        raise Exception(f"Erro ao fazer parse da resposta AWS Vault") from json_err
+
+    creds = data.get("data", {})
+
+    access_key = creds.get("access_key")
+    secret_key = creds.get("secret_key")
+    security_token = creds.get("security_token")
+
+    if not access_key or not secret_key:
+        raise Exception("Credenciais AWS incompletas na resposta do Vault")
+
+    return {
+        "AccessKey": access_key,
+        "SecretKey": secret_key,
+        "SecurityToken": security_token
+    }
 
 # =========================
 # AWS S3: Cria cliente boto3 S3 com credenciais do Vault.
+# O endpoint_url aponta para o VPC Endpoint (PrivateLink) da AWS,
+# permitindo acesso ao S3 a partir do ambiente da FunctionGraph.
 # =========================
-# def create_s3_client(aws_creds, region):
-#     try:
-#         session = boto3.Session(
-#             aws_access_key_id=aws_creds["AccessKey"],
-#             aws_secret_access_key=aws_creds["SecretKey"],
-#             aws_session_token=aws_creds["SecurityToken"],
-#             region_name=region
-#         )
-#         client = session.client("s3")
-#         return client
-#     except Exception as e:
-#         raise
+def create_s3_client(aws_creds, region, endpoint_url=None, ca_bundle=None):
+    try:
+        session = boto3.Session(
+            aws_access_key_id=aws_creds["AccessKey"],
+            aws_secret_access_key=aws_creds["SecretKey"],
+            aws_session_token=aws_creds["SecurityToken"],
+            region_name=region
+        )
+        # desabilita streaming payload signing (aws-chunked), incompatível com proxy que faz MITM TLS
+        config = Config(signature_version="s3v4", s3={"payload_signing_enabled": False})
+        client = session.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            verify=ca_bundle,
+            config=config
+        )
+        return client
+    except Exception as e:
+        raise
 
 # =========================
 # AWS S3: Upload arquivo local para o S3.
 # O 'key' preserva a mesma estrutura de diretórios do bucket de origem:
 #   Huawei/<report_period>/<epoch>/<filename>
 # =========================
-# def upload_to_s3(s3_client, bucket, key, local_path):
-#     if not os.path.exists(local_path):
-#         raise Exception(f"Arquivo não existe: {local_path}")
+def upload_to_s3(s3_client, bucket, key, local_path):
+    if not os.path.exists(local_path):
+        raise Exception(f"Arquivo não existe: {local_path}")
 
-#     file_size = os.path.getsize(local_path)
-#     logger.info(f"Upload S3: bucket={bucket}, key={key}, size={file_size}")
+    file_size = os.path.getsize(local_path)
+    logger.info(f"Upload S3: bucket={bucket}, key={key}, size={file_size}")
 
-#     try:
-#         s3_client.upload_file(local_path, bucket, key)
-#     except NoCredentialsError:
-#         raise Exception("Credenciais AWS não encontradas para upload S3")
-#     except ClientError as s3_err:
-#         raise Exception(
-#             f"Erro ClientError no upload S3 - bucket={bucket}, key={key}"
-#         ) from s3_err
-#     except Exception as e:
-#         raise Exception(
-#             f"Erro inesperado no upload S3 - bucket={bucket}, key={key}"
-#         ) from e
+    try:
+        s3_client.upload_file(local_path, bucket, key)
+    except NoCredentialsError:
+        raise Exception("Credenciais AWS não encontradas para upload S3")
+    except ClientError as s3_err:
+        raise Exception(
+            f"Erro ClientError no upload S3 - bucket={bucket}, key={key}, detalhe={str(s3_err)}"
+        ) from s3_err
+    except Exception as e:
+        raise Exception(
+            f"Erro inesperado no upload S3 - bucket={bucket}, key={key}, detalhe={str(e)}"
+        ) from e
 
 # =========================
 # HANDLER
@@ -513,10 +523,11 @@ def handler(event, context):
         csms_region = os.getenv("CSMS_REGION", "sa-brazil-1")
         csms_endpoint = os.getenv("CSMS_ENDPOINT", "https://kms.sa-brazil-1.myhuaweicloud.com")
         csms_project_id = os.getenv("CSMS_PROJECT_ID")
-        # aws_region = os.getenv("AWS_REGION", "sa-east-1")
-        # vault_url = os.getenv("VAULT_URL")
-        # vault_aws_path = os.getenv("VAULT_AWS_PATH")
-        # s3_bucket = os.getenv("S3_BUCKET")
+        aws_region = os.getenv("AWS_REGION", "sa-east-1")
+        s3_endpoint = os.getenv("S3_ENDPOINT")
+        vault_url = os.getenv("VAULT_URL")
+        vault_aws_path = os.getenv("VAULT_AWS_PATH")
+        s3_bucket = os.getenv("S3_BUCKET")
 
         missing = []
         if not obs_source_bucket:
@@ -525,12 +536,14 @@ def handler(event, context):
             missing.append("CSMS_PROJECT_ID")
         if not csms_secret_name:
             missing.append("CSMS_SECRET_NAME")
-        # if not s3_bucket:
-        #     missing.append("S3_BUCKET")
-        # if not vault_url:
-        #     missing.append("VAULT_URL")
-        # if not vault_aws_path:
-        #     missing.append("VAULT_AWS_PATH")
+        if not s3_bucket:
+            missing.append("S3_BUCKET")
+        if not s3_endpoint:
+            missing.append("S3_ENDPOINT")
+        if not vault_url:
+            missing.append("VAULT_URL")
+        if not vault_aws_path:
+            missing.append("VAULT_AWS_PATH")
         if missing:
             raise Exception(f"Variáveis de ambiente obrigatórias ausentes: {missing}")
 
@@ -555,13 +568,13 @@ def handler(event, context):
 
         # 2. Download dos certificados do bucket OBS ---
         logger.info("[STEP 2/10] Baixando certificados do bucket OBS")
-        # download_certs_from_obs(obs_client, obs_source_bucket, cert_dir, cert_file, ca_bundle)
+        download_certs_from_obs(obs_client, obs_source_bucket, cert_dir, cert_file, ca_bundle)
 
         # 3. Escreve key.pem a partir do secret no CSMS ---
         logger.info("[STEP 3/10] Escrevendo key.pem a partir do CSMS")
-        # key_local_path = os.path.join(cert_dir, key_file)
-        # key_content = fetch_key_from_csms(context, csms_secret_name, csms_region, endpoint=csms_endpoint, project_id=csms_project_id)
-        # write_key_file(key_content, key_local_path)
+        key_local_path = os.path.join(cert_dir, key_file)
+        key_content = fetch_key_from_csms(context, csms_secret_name, csms_region, endpoint=csms_endpoint, project_id=csms_project_id)
+        write_key_file(key_content, key_local_path)
 
         # 4. Lista objetos de custos no bucket OBS ---
         logger.info("[STEP 4/10] Lista objetos no bucket OBS")
@@ -585,20 +598,22 @@ def handler(event, context):
 
         # 7. Autentica no Vault ---
         logger.info("[STEP 7/10] Autenticando no Vault")
-        # client_token = vault_login(vault_url, CERT_FILE, KEY_FILE, CA_BUNDLE)
+        cert_local_path = os.path.join(cert_dir, cert_file)
+        ca_bundle_local_path = os.path.join(cert_dir, ca_bundle)
+        client_token = vault_login(vault_url, cert_local_path, key_local_path, ca_bundle_local_path)
 
         # 8. Obtém credenciais AWS do Vault ---
         logger.info("[STEP 8/10] Obtendo credenciais AWS do Vault")
-        # aws_creds = get_aws_credentials_from_vault(vault_aws_path, client_token, CA_BUNDLE)
+        aws_creds = get_aws_credentials_from_vault(vault_aws_path, client_token, ca_bundle_local_path)
 
         # 9. Cria cliente S3 ---
         logger.info("[STEP 9/10] Criando cliente S3")
-        # s3_client = create_s3_client(aws_creds, aws_region)
+        s3_client = create_s3_client(aws_creds, aws_region, endpoint_url=s3_endpoint, ca_bundle=ca_bundle_local_path)
 
         # 10. Upload CSV e JSON para o S3 ---
         logger.info("[STEP 10/10] Enviando arquivos para o S3")
-        # upload_to_s3(s3_client, s3_bucket, artifact["csv_key"], csv_local)
-        # upload_to_s3(s3_client, s3_bucket, artifact["json_key"], json_local)
+        upload_to_s3(s3_client, s3_bucket, artifact["csv_key"], csv_local)
+        upload_to_s3(s3_client, s3_bucket, artifact["json_key"], json_local)
 
         logger.info("===== HANDLER CONCLUÍDO COM SUCESSO =====")
 
